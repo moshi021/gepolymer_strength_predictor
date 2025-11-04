@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 """Geopolymer Strength Predictor
-
 """
 
 import streamlit as st
 import pandas as pd
 import xgboost as xgb
-from PIL import Image
 import shap
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Set page config
 st.set_page_config(
@@ -26,8 +25,7 @@ st.markdown("""
     }
 
     /* All text in the main app area */
-    [data-testid="stAppViewContainer"] *,
-    [data-testid="stHeader"] * {
+    [data-testid="stAppViewContainer"] * {
         color: #000000;
     }
 
@@ -53,146 +51,182 @@ st.markdown("""
 # --- Model Training ---
 # This section replicates the core logic from your Jupyter notebook.
 
-@st.cache_data
-def load_data(path):
-    """Loads and cleans the data from the CSV file."""
+@st.cache_data(show_spinner="Training model...")
+def train_model(data_path="etai final.csv"):
+    """
+    Loads data, cleans it, and trains the XGBoost model.
+    Returns the trained model and the feature data (X).
+    """
     try:
-        df = pd.read_csv(path)
+        data = pd.read_csv(data_path)
     except FileNotFoundError:
-        st.error(f"Error: The file '{path}' was not found. Please make sure it's in the same directory as this app.")
-        return None
+        st.error(f"Error: The data file ({data_path}) was not found.")
+        st.info("Please make sure 'etai final.csv' is in the same folder as this app.")
+        return None, None, None
 
-    # Replicating the notebook's df.dropna() to get a clean dataset
-    # This ensures we only train on complete records
-    df_cleaned = df.dropna()
-    return df_cleaned
+    # Data cleaning from your notebook
+    data.drop(['Total GHG emission', 'Total Cost(USD)'], axis=1, inplace=True)
+    data.dropna(inplace=True)
 
-@st.cache_resource
-def train_model(df):
-    """Trains the XGBoost model on the provided dataframe."""
-    # Define features (X) and target (y) based on the notebook
+    # Define features (X) and target (y)
+    features = [
+        'Fly Ash', 'GGBFS', 'NaOH_Molarity', 'NaOH amount', 'Sodium Silicate',
+        'Extra Water', 'Coarse Agg', 'Fine Agg', 'Coarse/Fine Agg',
+        'SuperPlasticizer', 'Curing Time(h)', 'Curing Temp(C)', 'Age of Testing (day)'
+    ]
+    target = 'Compressive Strength (MPa)'
+
+    X = data[features]
+    y = data[target]
+
+    # --- FIX for Streamlit Cloud ValueError ---
+    # Calculate the base_score as a simple float (mean of the target)
+    base_score_val = float(y.mean())
+    # ----------------------------------------
+
+    # Initialize and train the model, passing the calculated base_score
+    model = xgb.XGBRegressor(
+        random_state=42,
+        base_score=base_score_val  # Pass the float value here
+    )
+
     try:
-        X = df.drop(columns=['Compressive Strength (MPa)', 'Total GHG emission', 'Total Cost(USD)'])
-        y = df['Compressive Strength (MPa)']
-    except KeyError as e:
-        st.error(f"DataError: Missing expected column {e}. Please check your CSV file.")
-        return None, None
+        model.fit(X, y)
+    except Exception as e:
+        st.error(f"An error occurred during model training: {e}")
+        return None, None, None
 
-    # Initialize and train the model
-    model = xgb.XGBRegressor(random_state=42)
-    model.fit(X, y)
-
-    # Return the trained model, features, and target
     return model, X, y
 
-@st.cache_data
-def get_shap_plot(_model, _X):
-    """Generates and returns a matplotlib figure of the SHAP summary plot."""
-    # Note: SHAP calculations can be slow on large datasets
+# --- SHAP Plot Function ---
+@st.cache_data(show_spinner="Generating SHAP plot...")
+def get_shap_plot(_model, _features_data):
+    """
+    Generates and returns a Matplotlib figure of the SHAP summary plot.
+    """
+    # Use TreeExplainer for XGBoost
     explainer = shap.TreeExplainer(_model)
-    shap_values = explainer(_X)
+    shap_values = explainer.shap_values(_features_data)
 
-    # Create a matplotlib figure
+    # Create the plot
     fig, ax = plt.subplots()
-    shap.summary_plot(shap_values, _X, show=False)
-    plt.tight_layout() # Adjust layout to prevent cropping
+    shap.summary_plot(
+        shap_values,
+        _features_data,
+        plot_type="bar",
+        show=False,
+        max_display=len(_features_data.columns) # Show all features
+    )
+    plt.xlabel("Mean SHAP Value (Impact on Model Output)")
+    plt.title("Feature Importance (SHAP)")
+    plt.tight_layout()
     return fig
 
-# --- Main Application ---
+# --- Main App Interface ---
 
-st.title("Geopolymer Compressive Strength Predictor")
-st.markdown("This app predicts the compressive strength of geopolymer materials based on your input parameters, build by Md. Mashiur Rahman")
-st.markdown("### Model $R^2 = 95\%$")
+# Load and train the model
+model, features_data, target_data = train_model()
 
-# Load data and train the model
-data = load_data('etai final.csv')
+if model and features_data is not None and target_data is not None:
+    st.title("🧱 Geopolymer Compressive Strength Predictor")
+    st.markdown("### Model $R^2 \\approx 95\\%$")
+    st.markdown("Use the controls below to input material properties and predict the compressive strength.")
 
-if data is not None:
-    model, features_data, target_data = train_model(data)
+    st.divider()
 
-    if model and features_data is not None:
-        # --- User Inputs in Main Area ---
-        st.subheader("Input Parameters")
-        st.markdown("Adjust the values below to set the features for prediction.")
+    # --- Input Fields ---
+    st.header("Input Parameters")
 
-        # Create columns for a cleaner layout
-        cols = st.columns(3)
+    # Three-column layout for inputs
+    col1, col2, col3 = st.columns(3)
 
-        # Create a dictionary to hold the user's inputs
-        user_inputs = {}
+    with col1:
+        st.subheader("Binders & Aggregates (kg/m³)")
+        fly_ash = st.number_input("Fly Ash (kg/m³)", min_value=0.0, value=282.0)
+        ggbfs = st.number_input("GGBFS (kg/m³)", min_value=0.0, value=0.0)
+        coarse_agg = st.number_input("Coarse Agg (kg/m³)", min_value=0.0, value=1204.0)
+        fine_agg = st.number_input("Fine Agg (kg/m³)", min_value=0.0, value=648.0)
+        c_f_agg = st.number_input("Coarse/Fine Agg Ratio", min_value=0.0, value=1.85, format="%.2f")
 
-        # Dynamically create number inputs in columns
-        for i, col_name in enumerate(features_data.columns):
-            # Determine which column to place the input in
-            current_col = cols[i % 3]
+    with col2:
+        st.subheader("Activators & Additives")
+        naoh_molarity = st.number_input("NaOH Molarity (M)", min_value=0.0, value=10.0)
+        naoh_amount = st.number_input("NaOH amount (kg/m³)", min_value=0.0, value=52.0)
+        na_silicate = st.number_input("Sodium Silicate (kg/m³)", min_value=0.0, value=131.0)
+        extra_water = st.number_input("Extra Water (kg/m³)", min_value=0.0, value=9.0)
+        superplasticizer = st.number_input("SuperPlasticizer (kg/m³)", min_value=0.0, value=6.0)
 
-            # Use min, max, and mean from the training data to set slider defaults
-            min_val = float(features_data[col_name].min())
-            max_val = float(features_data[col_name].max())
-            mean_val = float(features_data[col_name].mean())
+    with col3:
+        st.subheader("Curing & Testing")
+        curing_time = st.number_input("Curing Time (h)", min_value=0.0, value=100.0)
+        curing_temp = st.number_input("Curing Temp (°C)", min_value=0.0, value=38.0)
+        age_testing = st.number_input("Age of Testing (day)", min_value=1.0, value=28.0)
 
-            # Use st.number_input for better precision, especially for float values
-            user_inputs[col_name] = current_col.number_input(
-                label=col_name,
-                min_value=min_val,
-                max_value=max_val,
-                value=mean_val,
-                step=0.1  # A reasonable step for most inputs
-            )
 
-        # Convert user inputs into a DataFrame for prediction
-        input_df = pd.DataFrame([user_inputs])
+    # --- Prediction Display ---
+    st.divider()
+    st.header("Prediction Result")
 
-        # --- Display Inputs and Prediction ---
+    # Create a DataFrame from the inputs, matching feature names
+    input_data = pd.DataFrame(
+        [[
+            fly_ash, ggbfs, naoh_molarity, naoh_amount, na_silicate,
+            extra_water, coarse_agg, fine_agg, c_f_agg,
+            superplasticizer, curing_time, curing_temp, age_testing
+        ]],
+        columns=features_data.columns
+    )
 
-        # Display the user's selected parameters
-        st.subheader("Your Input Parameters")
-        st.dataframe(input_df)
+    # Get the prediction
+    prediction = model.predict(input_data)
 
-        # Generate and display the prediction
-        prediction = model.predict(input_df)
-
-        st.subheader("Prediction")
+    # Display the prediction in a large, centered metric
+    pred_col, _ = st.columns([1, 2]) # Column to constrain width
+    with pred_col:
         st.metric(
             label="Predicted Compressive Strength",
             value=f"{prediction[0]:.2f} MPa"
         )
 
-        st.divider()
+    st.divider()
 
-        # --- Model Performance Plots ---
+    # --- Model Performance Plots ---
 
-        # Create two columns for the plots
-        plot_col1, plot_col2 = st.columns(2)
+    # Create two columns for the plots
+    plot_col1, plot_col2 = st.columns(2)
 
-        with plot_col1:
-            # Scatter plot: Predicted vs. Actual
-            st.subheader("Model Performance")
-            st.markdown("Predicted vs. Actual values from the training data.")
-            y_pred = model.predict(features_data)
+    with plot_col1:
+        # Scatter plot: Predicted vs. Actual
+        st.subheader("Model Performance")
+        st.markdown("Predicted vs. Actual values from the training data.")
+        y_pred = model.predict(features_data)
 
-            plot_data = pd.DataFrame({
-                'Actual': target_data,
-                'Predicted': y_pred
-            })
+        plot_data = pd.DataFrame({
+            'Actual': target_data,
+            'Predicted': y_pred
+        })
 
-            st.scatter_chart(plot_data, x='Actual', y='Predicted')
+        st.scatter_chart(plot_data, x='Actual', y='Predicted')
 
-        with plot_col2:
-            # SHAP Summary Plot
-            st.subheader("SHAP Summary Plot")
-            st.markdown("Feature impact on model output (from training data).")
+    with plot_col2:
+        # SHAP Summary Plot
+        st.subheader("SHAP Summary Plot")
+        st.markdown("Feature impact on model output (from training data).")
 
-            with st.spinner("Calculating SHAP values..."):
-                # Generate and display the cached SHAP plot
-                shap_fig = get_shap_plot(model, features_data)
-                st.pyplot(shap_fig, bbox_inches='tight', use_container_width=True)
+        with st.spinner("Calculating SHAP values..."):
+            # Generate and display the cached SHAP plot
+            shap_fig = get_shap_plot(model, features_data)
+            st.pyplot(shap_fig, bbox_inches='tight', use_container_width=True)
 
-        # --- Add Footer/Credit ---
-        st.divider()
-        st.divider()
-        st.markdown("Built by **Md. Mashiur Rahman** | [LinkedIn](https://www.linkedin.com/in/mashiur-rahman-ruet/) | [Email](2013021@student.ruet.ac.bd)")
-    else:
-        st.error("Model could not be trained. Please check your data and the console for errors.")
+    # --- Add Footer/Credit ---
+    st.divider()
+    st.markdown("---")
+    st.markdown(
+        """
+        Built by **Md. Mashiur Rahman**
+        
+        [LinkedIn](https://www.linkedin.com/in/mashiur-rahman-ruet/) | [Email](mailto:2013021@student.ruet.ac.bd)
+        """
+    )
 else:
-    st.error("Data could not be loaded. The app cannot proceed.")
+    st.error("Application could not start. Please ensure the 'etai final.csv' file is available and the model can be trained.")
