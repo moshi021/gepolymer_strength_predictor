@@ -5,9 +5,8 @@
 import streamlit as st
 import pandas as pd
 import xgboost as xgb
-import shap
-import matplotlib.pyplot as plt
 import numpy as np
+import base64 # Added for displaying PDFs
 
 # Set page config
 st.set_page_config(
@@ -48,9 +47,22 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- Model Training ---
-# This section replicates the core logic from your Jupyter notebook.
+# --- Function to Display PDF ---
+def display_pdf(file_path):
+    """Reads a PDF file and displays it in Streamlit."""
+    try:
+        with open(file_path, "rb") as f:
+            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+        # Embedding PDF in HTML
+        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500px" type="application/pdf"></iframe>'
+        st.markdown(pdf_display, unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.error(f"Error: The file '{file_path}' was not found.")
+        st.info("Please make sure this file is in your GitHub repository.")
+    except Exception as e:
+        st.error(f"An error occurred while displaying '{file_path}': {e}")
 
+# --- Model Training ---
 @st.cache_data(show_spinner="Training model...")
 def train_model(data_path="etai final.csv"):
     """
@@ -64,11 +76,9 @@ def train_model(data_path="etai final.csv"):
         st.info("Please make sure 'etai final.csv' is in the same folder as this app.")
         return None, None, None
 
-    # Data cleaning from your notebook
     data.drop(['Total GHG emission', 'Total Cost(USD)'], axis=1, inplace=True)
     data.dropna(inplace=True)
 
-    # Define features (X) and target (y)
     features = [
         'Fly Ash', 'GGBFS', 'NaOH_Molarity', 'NaOH amount', 'Sodium Silicate',
         'Extra Water', 'Coarse Agg', 'Fine Agg', 'Coarse/Fine Agg',
@@ -79,15 +89,13 @@ def train_model(data_path="etai final.csv"):
     X = data[features]
     y = data[target]
 
-    # --- FIX for Streamlit Cloud ValueError ---
-    # Calculate the base_score as a simple float (mean of the target)
+    # This fix is kept as good practice, although the error it solved (in SHAP)
+    # is no longer relevant since SHAP is removed.
     base_score_val = float(y.mean())
-    # ----------------------------------------
 
-    # Initialize and train the model, passing the calculated base_score
     model = xgb.XGBRegressor(
         random_state=42,
-        base_score=base_score_val  # Pass the float value here
+        base_score=base_score_val
     )
 
     try:
@@ -98,30 +106,6 @@ def train_model(data_path="etai final.csv"):
 
     return model, X, y
 
-# --- SHAP Plot Function ---
-@st.cache_data(show_spinner="Generating SHAP plot...")
-def get_shap_plot(_model, _features_data):
-    """
-    Generates and returns a Matplotlib figure of the SHAP summary plot.
-    """
-    # Use TreeExplainer for XGBoost
-    explainer = shap.TreeExplainer(_model)
-    shap_values = explainer.shap_values(_features_data)
-
-    # Create the plot
-    fig, ax = plt.subplots()
-    shap.summary_plot(
-        shap_values,
-        _features_data,
-        plot_type="bar",
-        show=False,
-        max_display=len(_features_data.columns) # Show all features
-    )
-    plt.xlabel("Mean SHAP Value (Impact on Model Output)")
-    plt.title("Feature Importance (SHAP)")
-    plt.tight_layout()
-    return fig
-
 # --- Main App Interface ---
 
 # Load and train the model
@@ -130,14 +114,12 @@ model, features_data, target_data = train_model()
 if model and features_data is not None and target_data is not None:
     st.title("🧱 Geopolymer Compressive Strength Predictor")
     st.markdown("### Model $R^2 \\approx 95\\%$")
-    st.markdown("Use the controls below to input material properties and predict the compressive strength, build by Md. Mashiur Rahman")
+    st.markdown("Use the controls below to input material properties and predict the compressive strength.")
 
     st.divider()
 
     # --- Input Fields ---
     st.header("Input Parameters")
-
-    # Three-column layout for inputs
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -167,7 +149,6 @@ if model and features_data is not None and target_data is not None:
     st.divider()
     st.header("Prediction Result")
 
-    # Create a DataFrame from the inputs, matching feature names
     input_data = pd.DataFrame(
         [[
             fly_ash, ggbfs, naoh_molarity, naoh_amount, na_silicate,
@@ -177,11 +158,9 @@ if model and features_data is not None and target_data is not None:
         columns=features_data.columns
     )
 
-    # Get the prediction
     prediction = model.predict(input_data)
 
-    # Display the prediction in a large, centered metric
-    pred_col, _ = st.columns([1, 2]) # Column to constrain width
+    pred_col, _ = st.columns([1, 2])
     with pred_col:
         st.metric(
             label="Predicted Compressive Strength",
@@ -190,33 +169,20 @@ if model and features_data is not None and target_data is not None:
 
     st.divider()
 
-    # --- Model Performance Plots ---
-
-    # Create two columns for the plots
+    # --- Model Performance Plots (from PDF) ---
+    st.header("Model Performance")
+    
     plot_col1, plot_col2 = st.columns(2)
 
     with plot_col1:
-        # Scatter plot: Predicted vs. Actual
-        st.subheader("Model Performance")
-        st.markdown("Predicted vs. Actual values from the training data.")
-        y_pred = model.predict(features_data)
-
-        plot_data = pd.DataFrame({
-            'Actual': target_data,
-            'Predicted': y_pred
-        })
-
-        st.scatter_chart(plot_data, x='Actual', y='Predicted')
+        st.subheader("Predicted vs. Actual")
+        # Use the function to display the prediction PDF
+        display_pdf("pred_strength.pdf")
 
     with plot_col2:
-        # SHAP Summary Plot
         st.subheader("SHAP Summary Plot")
-        st.markdown("Feature impact on model output (from training data).")
-
-        with st.spinner("Calculating SHAP values..."):
-            # Generate and display the cached SHAP plot
-            shap_fig = get_shap_plot(model, features_data)
-            st.pyplot(shap_fig, bbox_inches='tight', use_container_width=True)
+        # Use the function to display the SHAP PDF
+        display_pdf("shap.pdf")
 
     # --- Add Footer/Credit ---
     st.divider()
@@ -230,3 +196,4 @@ if model and features_data is not None and target_data is not None:
     )
 else:
     st.error("Application could not start. Please ensure the 'etai final.csv' file is available and the model can be trained.")
+
