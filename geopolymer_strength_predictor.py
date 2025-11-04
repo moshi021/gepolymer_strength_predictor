@@ -93,7 +93,7 @@ def train_model(df):
 def get_shap_plot(_model, _X):
     """Generates and returns a matplotlib figure of the SHAP summary plot."""
     # Note: SHAP calculations can be slow on large datasets
-    explainer = shap.Explainer(_model)
+    explainer = shap.TreeExplainer(_model)
     shap_values = explainer(_X)
 
     # Create a matplotlib figure
