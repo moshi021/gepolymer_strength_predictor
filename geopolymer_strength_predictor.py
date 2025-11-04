@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Geopolymer Strength Predictor
 """
 
@@ -5,7 +6,6 @@ import streamlit as st
 import pandas as pd
 import xgboost as xgb
 import numpy as np
-from streamlit_pdf_viewer import pdf_viewer # Added for displaying PDFs
 
 # Set page config
 st.set_page_config(
@@ -46,9 +46,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- Function to Display PDF (REMOVED) ---
-# The old display_pdf function is no longer needed.
-
 # --- Model Training ---
 @st.cache_data(show_spinner="Training model...")
 def train_model(data_path="etai final.csv"):
@@ -76,8 +73,6 @@ def train_model(data_path="etai final.csv"):
     X = data[features]
     y = data[target]
 
-    # This fix is kept as good practice, although the error it solved (in SHAP)
-    # is no longer relevant since SHAP is removed.
     base_score_val = float(y.mean())
 
     model = xgb.XGBRegressor(
@@ -156,26 +151,24 @@ if model and features_data is not None and target_data is not None:
 
     st.divider()
 
-    # --- Model Performance Plots (from PDF) ---
+    # --- Model Performance Plots (from Images) ---
     st.header("Model Performance")
     
     plot_col1, plot_col2 = st.columns(2)
 
     with plot_col1:
         st.subheader("Predicted vs. Actual")
-        # Use the new pdf_viewer component
         try:
-            pdf_viewer("pred_strength.pdf", height=500)
+            st.image("pred_strength.jpg", caption="Predicted vs. Observed Value", use_column_width=True)
         except FileNotFoundError:
-            st.error("Error: The file 'pred_strength (1).pdf' was not found.")
+            st.error("Error: The file 'Image 1.png' was not found. Please ensure it's in your repository.")
 
     with plot_col2:
         st.subheader("SHAP Summary Plot")
-        # Use the new pdf_viewer component
         try:
-            pdf_viewer("shap.pdf", height=500)
+            st.image("shap.jpg", caption="SHAP Value (Impact on Model Output)", use_column_width=True)
         except FileNotFoundError:
-            st.error("Error: The file 'shap.pdf' was not found.")
+            st.error("Error: The file 'shap.jpg' was not found. Please ensure it's in your repository.")
 
     # --- Add Footer/Credit ---
     st.divider()
