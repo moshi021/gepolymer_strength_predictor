@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Geopolymer Strength Predictor
 """
 
@@ -6,7 +5,7 @@ import streamlit as st
 import pandas as pd
 import xgboost as xgb
 import numpy as np
-import base64 # Added for displaying PDFs
+from streamlit_pdf_viewer import pdf_viewer # Added for displaying PDFs
 
 # Set page config
 st.set_page_config(
@@ -47,20 +46,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- Function to Display PDF ---
-def display_pdf(file_path):
-    """Reads a PDF file and displays it in Streamlit."""
-    try:
-        with open(file_path, "rb") as f:
-            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-        # Embedding PDF in HTML
-        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500px" type="application/pdf"></iframe>'
-        st.markdown(pdf_display, unsafe_allow_html=True)
-    except FileNotFoundError:
-        st.error(f"Error: The file '{file_path}' was not found.")
-        st.info("Please make sure this file is in your GitHub repository.")
-    except Exception as e:
-        st.error(f"An error occurred while displaying '{file_path}': {e}")
+# --- Function to Display PDF (REMOVED) ---
+# The old display_pdf function is no longer needed.
 
 # --- Model Training ---
 @st.cache_data(show_spinner="Training model...")
@@ -176,13 +163,19 @@ if model and features_data is not None and target_data is not None:
 
     with plot_col1:
         st.subheader("Predicted vs. Actual")
-        # Use the function to display the prediction PDF
-        display_pdf("pred_strength.pdf")
+        # Use the new pdf_viewer component
+        try:
+            pdf_viewer("pred_strength.pdf", height=500)
+        except FileNotFoundError:
+            st.error("Error: The file 'pred_strength (1).pdf' was not found.")
 
     with plot_col2:
         st.subheader("SHAP Summary Plot")
-        # Use the function to display the SHAP PDF
-        display_pdf("shap.pdf")
+        # Use the new pdf_viewer component
+        try:
+            pdf_viewer("shap.pdf", height=500)
+        except FileNotFoundError:
+            st.error("Error: The file 'shap.pdf' was not found.")
 
     # --- Add Footer/Credit ---
     st.divider()
@@ -191,7 +184,7 @@ if model and features_data is not None and target_data is not None:
         """
         Built by **Md. Mashiur Rahman**
         
-        [LinkedIn](https://www.linkedin.com/in/mashiur-rahman-ruet/) | [Email](mailto:2013021@student.ruet.ac.bd)
+        [LinkedIn](https://www.linkedin.in/mashiur-rahman-ruet/) | [Email](mailto:2013021@student.ruet.ac.bd)
         """
     )
 else:
