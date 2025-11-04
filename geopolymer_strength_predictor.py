@@ -130,7 +130,7 @@ model, features_data, target_data = train_model()
 if model and features_data is not None and target_data is not None:
     st.title("🧱 Geopolymer Compressive Strength Predictor")
     st.markdown("### Model $R^2 \\approx 95\\%$")
-    st.markdown("Use the controls below to input material properties and predict the compressive strength.")
+    st.markdown("Use the controls below to input material properties and predict the compressive strength, build by Md. Mashiur Rahman")
 
     st.divider()
 
